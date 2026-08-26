@@ -1,2 +1,2 @@
 @Library('kafka-dr-lib') _
-drSwitchPipeline(direction: 'primary-to-dr', approvers: 'dr-approvers')
+drSwitchPipeline(direction: 'primary-to-dr', approvers: 'surya9618')

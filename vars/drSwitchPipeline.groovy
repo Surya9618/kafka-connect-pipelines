@@ -119,10 +119,10 @@ def call(Map config) {
                                     git config user.name 'jenkins-dr-bot'
                                     python3 scripts/apply_config.py --direction ${config.direction} --commit-audit
                                 """
-                                sh '''
-                                    REMOTE_HOST_PATH=$(git config --get remote.origin.url | sed -E "s#https?://##")
-                                    git push "https://${GIT_USER}:${GIT_TOKEN}@${REMOTE_HOST_PATH}" HEAD:$(git rev-parse --abbrev-ref HEAD)
-                                '''
+                                sh """
+                                    REMOTE_HOST_PATH=\$(git config --get remote.origin.url | sed -E "s#https?://##")
+                                    git push "https://\${GIT_USER}:\${GIT_TOKEN}@\${REMOTE_HOST_PATH}" HEAD:refs/heads/${config.targetBranch ?: 'main'}
+                                """
                             }
                         } else {
                             sh "python3 scripts/apply_config.py --direction ${config.direction} --commit-audit"
