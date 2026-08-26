@@ -68,14 +68,48 @@ def resolve_source_target(entry, direction):
         raise ValueError(f"Unknown direction: {direction}")
 
 
-def filter_connectors(entries, connector_list):
-    if not connector_list or connector_list.strip().upper() == "ALL":
+def filter_connectors(entries, connector_list, group_list=""):
+    """
+    Union semantics: an entry is included if its name is in connector_list
+    OR any of its 'groups' overlaps group_list.
+
+    connector_list of "" or "ALL" means "no restriction from this argument" —
+    but if group_list is also given, "ALL"/"" is treated as no-op so groups
+    can actually narrow the selection. Only when BOTH are empty/ALL do we
+    return everything.
+    """
+    connector_list = (connector_list or "").strip()
+    group_list = (group_list or "").strip()
+
+    connector_list_is_all = connector_list == "" or connector_list.upper() == "ALL"
+
+    if connector_list_is_all and not group_list:
         return entries
-    wanted = {n.strip() for n in connector_list.split(",") if n.strip()}
-    filtered = [e for e in entries if e["name"] in wanted]
-    missing = wanted - {e["name"] for e in filtered}
-    if missing:
-        print(f"WARNING: connectors not found in mapping file: {', '.join(sorted(missing))}", file=sys.stderr)
+
+    wanted_names = set()
+    if not connector_list_is_all:
+        wanted_names = {n.strip() for n in connector_list.split(",") if n.strip()}
+
+    wanted_groups = {g.strip() for g in group_list.split(",") if g.strip()}
+
+    filtered = []
+    for e in entries:
+        entry_groups = set(e.get("groups", []) or [])
+        if e["name"] in wanted_names or (entry_groups & wanted_groups):
+            filtered.append(e)
+
+    matched_names = {e["name"] for e in filtered}
+    missing_names = wanted_names - matched_names
+    if missing_names:
+        print(f"WARNING: connectors not found in mapping file: {', '.join(sorted(missing_names))}", file=sys.stderr)
+
+    matched_groups = set()
+    for e in filtered:
+        matched_groups |= (set(e.get("groups", []) or []) & wanted_groups)
+    missing_groups = wanted_groups - matched_groups
+    if missing_groups:
+        print(f"WARNING: groups matched no connectors: {', '.join(sorted(missing_groups))}", file=sys.stderr)
+
     return filtered
 
 
@@ -270,6 +304,7 @@ def main():
     parser.add_argument("--mapping", default=DEFAULT_MAPPING_PATH, help="Path to primary-to-dr.yaml")
     parser.add_argument("--direction", required=True, choices=["primary-to-dr", "dr-to-primary"])
     parser.add_argument("--connectors", default="ALL", help="Comma-separated connector names, or ALL")
+    parser.add_argument("--groups", default="", help="Comma-separated group names. Union with --connectors.")
 
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--backup-only", action="store_true")
@@ -285,7 +320,7 @@ def main():
     args = parser.parse_args()
 
     mapping = common.parse_mapping_yaml(args.mapping)
-    entries = filter_connectors(flatten_entries(mapping), args.connectors)
+    entries = filter_connectors(flatten_entries(mapping), args.connectors, args.groups)
 
     if not entries:
         print("No matching connectors found in mapping file — nothing to do.")

@@ -25,6 +25,8 @@ def call(Map config) {
         parameters {
             string(name: 'CONNECTOR_LIST', defaultValue: 'ALL',
                    description: 'Comma-separated connector names, or ALL')
+            string(name: 'GROUPS', defaultValue: '',
+                   description: 'Comma-separated group names (from the groups: field in the mapping file). Union with CONNECTOR_LIST — leave CONNECTOR_LIST as ALL and set GROUPS to select by group only.')
             booleanParam(name: 'DRY_RUN', defaultValue: true,
                    description: 'If true: only checkout/validate/backup/diff. No approval, no apply, no verify, no audit commit/push.')
         }
@@ -43,7 +45,8 @@ def call(Map config) {
                         python3 scripts/apply_config.py \
                             --direction ${config.direction} \
                             --validate-only \
-                            --connectors '${params.CONNECTOR_LIST}'
+                            --connectors '${params.CONNECTOR_LIST}' \
+                            --groups '${params.GROUPS}'
                     """
                 }
             }
@@ -54,7 +57,8 @@ def call(Map config) {
                         python3 scripts/apply_config.py \
                             --direction ${config.direction} \
                             --backup-only \
-                            --connectors '${params.CONNECTOR_LIST}'
+                            --connectors '${params.CONNECTOR_LIST}' \
+                            --groups '${params.GROUPS}'
                     """
                 }
             }
@@ -65,7 +69,8 @@ def call(Map config) {
                         python3 scripts/apply_config.py \
                             --direction ${config.direction} \
                             --diff-only \
-                            --connectors '${params.CONNECTOR_LIST}'
+                            --connectors '${params.CONNECTOR_LIST}' \
+                            --groups '${params.GROUPS}'
                     """
                 }
             }
@@ -73,7 +78,7 @@ def call(Map config) {
             stage('Approval') {
                 when { expression { !params.DRY_RUN } }
                 steps {
-                    input message: "Confirm ${config.direction} DR switch for connectors: ${params.CONNECTOR_LIST}?",
+                    input message: "Confirm ${config.direction} DR switch for connectors: ${params.CONNECTOR_LIST}, groups: ${params.GROUPS ?: '(none)'}?",
                           submitter: config.approvers ?: null
                 }
             }
@@ -85,7 +90,8 @@ def call(Map config) {
                         python3 scripts/apply_config.py \
                             --direction ${config.direction} \
                             --apply \
-                            --connectors '${params.CONNECTOR_LIST}'
+                            --connectors '${params.CONNECTOR_LIST}' \
+                            --groups '${params.GROUPS}'
                     """
                 }
             }
@@ -97,7 +103,8 @@ def call(Map config) {
                         python3 scripts/apply_config.py \
                             --direction ${config.direction} \
                             --verify \
-                            --connectors '${params.CONNECTOR_LIST}'
+                            --connectors '${params.CONNECTOR_LIST}' \
+                            --groups '${params.GROUPS}'
                     """
                 }
             }

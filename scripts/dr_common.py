@@ -105,6 +105,21 @@ def _unquote(raw):
     return raw
 
 
+def _parse_value(raw):
+    """
+    Parses a scalar string value, or an inline list value like:
+    ["retail", "tier1"]  ->  ["retail", "tier1"]
+    Falls back to plain unquoted scalar for everything else.
+    """
+    raw = raw.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        if not inner:
+            return []
+        return [_unquote(item) for item in inner.split(",")]
+    return _unquote(raw)
+
+
 def parse_mapping_yaml(path):
     """
     Parses the fixed schema:
@@ -169,7 +184,7 @@ def parse_mapping_yaml(path):
                 continue
 
             key, _, value = content.partition(":")
-            current_entry[key.strip()] = _unquote(value)
+            current_entry[key.strip()] = _parse_value(value)
 
     return result
 
