@@ -26,9 +26,7 @@ def call(Map config) {
             string(name: 'CONNECTOR_LIST', defaultValue: 'ALL',
                    description: 'Comma-separated connector names, or ALL')
             booleanParam(name: 'DRY_RUN', defaultValue: true,
-                   description: 'If true: only checkout/validate/backup/diff. No approval, no apply, no verify, no audit push.')
-            booleanParam(name: 'PUSH_AUDIT', defaultValue: false,
-                   description: 'Push the audit commit to the git remote after apply (requires git-push-creds).')
+                   description: 'If true: only checkout/validate/backup/diff. No approval, no apply, no verify, no audit commit/push.')
         }
 
         stages {
@@ -107,27 +105,20 @@ def call(Map config) {
             stage('Commit audit trail') {
                 when { expression { !params.DRY_RUN } }
                 steps {
-                    script {
-                        if (params.PUSH_AUDIT) {
-                            withCredentials([usernamePassword(
-                                credentialsId: 'git-push-creds',
-                                usernameVariable: 'GIT_USER',
-                                passwordVariable: 'GIT_TOKEN'
-                            )]) {
-                                sh """
-                                    git config user.email 'jenkins-dr-bot@yourorg.com'
-                                    git config user.name 'jenkins-dr-bot'
-                                    python3 scripts/apply_config.py --direction ${config.direction} --commit-audit
-                                """
-                                sh """
-                                    REMOTE_HOST_PATH=\$(git config --get remote.origin.url | sed -E "s#https?://##")
-                                    git push "https://\${GIT_USER}:\${GIT_TOKEN}@\${REMOTE_HOST_PATH}" HEAD:refs/heads/${config.targetBranch ?: 'main'}
-                                """
-                            }
-                        } else {
-                            sh "python3 scripts/apply_config.py --direction ${config.direction} --commit-audit"
-                            echo 'Audit commit created in the Jenkins workspace but NOT pushed (PUSH_AUDIT=false). Push manually if needed.'
-                        }
+                    withCredentials([usernamePassword(
+                        credentialsId: 'git-push-creds',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )]) {
+                        sh """
+                            git config user.email 'jenkins-dr-bot@yourorg.com'
+                            git config user.name 'jenkins-dr-bot'
+                            python3 scripts/apply_config.py --direction ${config.direction} --commit-audit
+                        """
+                        sh """
+                            REMOTE_HOST_PATH=\$(git config --get remote.origin.url | sed -E "s#https?://##")
+                            git push "https://\${GIT_USER}:\${GIT_TOKEN}@\${REMOTE_HOST_PATH}" HEAD:refs/heads/${config.targetBranch ?: 'main'}
+                        """
                     }
                 }
             }
