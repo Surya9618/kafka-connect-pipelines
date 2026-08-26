@@ -1,0 +1,23 @@
+# connect_config.yaml
+# Connection settings for the Kafka Connect REST API.
+# Edit this file when the environment changes (dev/stage/prod/DR) —
+# no need to touch generate_dr_mapping.py itself.
+#
+# NOTE: this file is parsed by a small built-in reader (no PyYAML needed),
+# so keep it in this simple flat "key: value" format. Don't add nested
+# lists/maps beyond what's shown here.
+
+connect_url: http://localhost:8083
+
+# Basic auth (leave both blank if not needed)
+user:
+password:
+
+# true/false — skip TLS certificate verification (e.g. self-signed certs in lower envs)
+insecure: false
+
+# request timeout in seconds
+timeout: 15
+
+# Optional extra headers, one per line, format: header_NAME: value
+# e.g. to send a bearer token: header_Authorization: Bearer xxxxx
