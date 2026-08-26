@@ -1,2 +1,2 @@
-direction: primary-to-dr
-timestamp_utc: 2026-08-26T20:14:43.964344+00:00
+direction: dr-to-primary
+timestamp_utc: 2026-08-26T20:15:21.386859+00:00
