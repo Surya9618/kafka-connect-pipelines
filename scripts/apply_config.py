@@ -113,7 +113,7 @@ def cmd_validate(entries, direction, opener, conn_cfg, connect_url):
 
 
 def cmd_backup(entries, opener, conn_cfg, connect_url, direction):
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_dir = os.path.join("backups", f"{direction}-{timestamp}")
     os.makedirs(backup_dir, exist_ok=True)
 
@@ -242,11 +242,11 @@ def cmd_commit_audit(direction, push=False):
     os.makedirs("backups", exist_ok=True)
     with open(summary_path, "w", encoding="utf-8") as f:
         f.write(f"direction: {direction}\n")
-        f.write(f"timestamp_utc: {datetime.datetime.utcnow().isoformat()}Z\n")
+        f.write(f"timestamp_utc: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n")
 
     commands = [
         ["git", "add", "backups/"],
-        ["git", "commit", "-m", f"DR audit: {direction} at {datetime.datetime.utcnow().isoformat()}Z"],
+        ["git", "commit", "-m", f"DR audit: {direction} at {datetime.datetime.now(datetime.timezone.utc).isoformat()}"],
     ]
     if push:
         commands.append(["git", "push"])

@@ -1,0 +1,28 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Environment-specific connection configs (never commit real secrets) ---
+# Keep the template connect_config.yaml checked in with blank user/password.
+# Any per-environment override file should stay local/untracked.
+*_connect_config.yaml
+connect_config.local.yaml
+
+# NOTE: backups/ is deliberately NOT ignored here. apply_config.py's
+# --commit-audit stage commits backups/ to git on purpose, as the permanent
+# audit trail of every DR switch. Ignoring it would silently break that
+# stage (git add would do nothing, and the commit step would fail with
+# "nothing to commit").
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# --- Jenkins / shell leftovers if scripts are ever run locally ---
+*.log
+nohup.out
