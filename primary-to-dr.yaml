@@ -1,0 +1,10 @@
+version: 1
+direction: primary-to-dr
+
+connectors:
+  jdbc:
+    - name: "mysql-source-test"
+      config_key: "connection.url"
+      primary_url: "jdbc:mysql://mysql-db:3306/kafka_test?useSSL=false&allowPublicKeyRetrieval=true"
+      dr_url: "jdbc:mysql://192.168.64.2:3306/kafka_test?useSSL=false&allowPublicKeyRetrieval=true"
+
