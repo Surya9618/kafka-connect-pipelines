@@ -1,0 +1,14 @@
+{
+  "connection.password": "my-secret-pw",
+  "connection.url": "jdbc:mysql://192.168.64.2:3306/kafka_test?useSSL=false&allowPublicKeyRetrieval=true",
+  "connection.user": "root",
+  "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+  "incrementing.column.name": "id",
+  "mode": "timestamp+incrementing",
+  "name": "mysql-source-test",
+  "poll.interval.ms": "5000",
+  "table.whitelist": "customers",
+  "tasks.max": "1",
+  "timestamp.column.name": "updated_at",
+  "topic.prefix": "mysql-jenkin-test"
+}
