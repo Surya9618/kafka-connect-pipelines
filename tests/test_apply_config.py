@@ -106,6 +106,61 @@ class ApplyTests(unittest.TestCase):
         self.assertIn("[OK]    good", out)
 
 
+def status(conn, *tasks):
+    return {"connector": {"state": conn}, "tasks": [{"id": i, "state": t} for i, t in enumerate(tasks)]}
+
+
+class VerifyTests(unittest.TestCase):
+    """cmd_verify with a mocked status sequence and zero poll interval."""
+
+    def run_verify(self, statuses, live_url=DR, timeout=5):
+        mock.patch.object(apply_config.common, "get_connector_config",
+                          return_value={"connection.url": live_url}).start()
+        mock.patch.object(apply_config.common, "get_connector_status",
+                          side_effect=list(statuses)).start()
+        mock.patch.object(apply_config.time, "sleep").start()
+        self.addCleanup(mock.patch.stopall)
+        return run_quiet(apply_config.cmd_verify, [entry("c")], "primary-to-dr",
+                         None, CONN_CFG, "http://x", timeout, 0)
+
+    def test_running_after_restart(self):
+        code, out = self.run_verify([status("UNASSIGNED"), status("RUNNING", "RUNNING")])
+        self.assertIn(code, (0, None))
+        self.assertIn("[WAIT]", out)
+        self.assertIn("[OK]", out)
+
+    def test_paused_passes_with_warning(self):
+        code, out = self.run_verify([status("PAUSED", "PAUSED")])
+        self.assertIn(code, (0, None))
+        self.assertIn("[WARN]", out)
+        self.assertIn("left paused", out)
+
+    def test_stopped_with_no_tasks_passes(self):
+        code, _ = self.run_verify([status("STOPPED")])
+        self.assertIn(code, (0, None))
+
+    def test_paused_connector_with_running_task_keeps_waiting(self):
+        code, out = self.run_verify([status("PAUSED", "RUNNING"), status("PAUSED", "PAUSED")])
+        self.assertIn(code, (0, None))
+        self.assertIn("[WAIT]", out)
+
+    def test_failed_task_fails(self):
+        code, out = self.run_verify([status("RUNNING", "FAILED")])
+        self.assertEqual(code, 1)
+        self.assertIn("[FAILED]", out)
+
+    def test_live_value_not_at_target_fails_without_polling(self):
+        code, out = self.run_verify([], live_url=PRIMARY)
+        self.assertEqual(code, 1)
+        self.assertIn("expected target", out)
+
+    def test_timeout_fails(self):
+        with mock.patch.object(apply_config.time, "time", side_effect=[0, 0, 999]):
+            code, out = self.run_verify([status("UNASSIGNED"), status("UNASSIGNED")])
+        self.assertEqual(code, 1)
+        self.assertIn("Timed out", out)
+
+
 class FilterTests(unittest.TestCase):
     ENTRIES = [entry("a", groups=["retail"]), entry("b", groups=["tier1"]), entry("c")]
 

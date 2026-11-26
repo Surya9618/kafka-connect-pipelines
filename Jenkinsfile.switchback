@@ -71,12 +71,17 @@ pipeline {
         DIRECTION       = "${direction}"
         GIT_PUSH_SCHEME = "${gitPushScheme}"
         TARGET_BRANCH   = "${targetBranch}"
+        PYTHONUNBUFFERED = '1'   // stream script output live instead of at the end of each step
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
+                // The workspace is reused between builds. Drop untracked backups left by
+                // earlier builds (e.g. dry runs) so this run's audit commit contains only
+                // this run's backup. Earlier builds' backups remain in their own artifacts.
+                sh 'git clean -fdq -- backups/'
             }
         }
 
@@ -111,12 +116,14 @@ pipeline {
 
         stage('Apply') {
             when { expression { !params.DRY_RUN } }
-            steps { script { runDr('--apply', connectCredsId) } }
+            // catchError: a failure here still marks the build FAILED, but the audit
+            // commit below runs anyway — a change that reached Connect must be recorded.
+            steps { catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { script { runDr('--apply', connectCredsId) } } }
         }
 
         stage('Verify') {
             when { expression { !params.DRY_RUN } }
-            steps { script { runDr('--verify', connectCredsId) } }
+            steps { catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { script { runDr('--verify', connectCredsId) } } }
         }
 
         stage('Commit audit trail') {

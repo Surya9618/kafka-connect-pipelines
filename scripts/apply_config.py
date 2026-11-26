@@ -276,13 +276,43 @@ def cmd_apply(entries, direction, opener, conn_cfg, connect_url):
         sys.exit(1)
 
 
-def cmd_verify(entries, opener, conn_cfg, connect_url, timeout_seconds=120, poll_interval=5):
-    print(f"Verifying {len(entries)} connector(s) reach RUNNING state (timeout {timeout_seconds}s)\n")
-    pending = {e["name"] for e in entries}
-    deadline = time.time() + timeout_seconds
-    failed = []
+PAUSED_STATES = ("PAUSED", "STOPPED")
 
-    while pending and time.time() < deadline:
+
+def cmd_verify(entries, direction, opener, conn_cfg, connect_url, timeout_seconds=120, poll_interval=5):
+    """
+    1. Confirms each connector's live config_key equals the target value.
+    2. Polls /status until each connector is settled:
+         RUNNING (connector + all tasks)  -> OK
+         PAUSED / STOPPED                 -> OK with warning. An operator paused it;
+                                             the switch never resumes connectors.
+         FAILED (connector or any task)   -> fail immediately
+         anything else                    -> keep polling until timeout
+    """
+    print(f"Verifying {len(entries)} connector(s) (timeout {timeout_seconds}s)\n")
+    failed, paused = [], []
+
+    pending = {}
+    for e in entries:
+        _, target = resolve_source_target(e, direction)
+        try:
+            live = common.get_connector_config(
+                opener, connect_url, e["name"], conn_cfg["user"], conn_cfg["password"],
+                conn_cfg["headers"], conn_cfg["timeout"]
+            )
+        except Exception as err:
+            print(f"[ERROR] {e['name']}: could not fetch live config: {err}")
+            failed.append(e["name"])
+            continue
+        current = live.get(e["config_key"], "")
+        if current != target:
+            print(f"[FAILED] {e['name']}: {e['config_key']} is '{current}', expected target '{target}'")
+            failed.append(e["name"])
+            continue
+        pending[e["name"]] = e
+
+    deadline = time.time() + timeout_seconds
+    while pending:
         for name in list(pending):
             try:
                 status = common.get_connector_status(
@@ -290,7 +320,7 @@ def cmd_verify(entries, opener, conn_cfg, connect_url, timeout_seconds=120, poll
                     conn_cfg["headers"], conn_cfg["timeout"]
                 )
             except Exception as err:
-                print(f"[ERROR] {name}: status check failed: {err}")
+                print(f"[WAIT]  {name}: status check failed: {err}")
                 continue
 
             connector_state = status.get("connector", {}).get("state", "UNKNOWN")
@@ -298,24 +328,34 @@ def cmd_verify(entries, opener, conn_cfg, connect_url, timeout_seconds=120, poll
 
             if connector_state == "RUNNING" and all(s == "RUNNING" for s in task_states):
                 print(f"[OK]    {name}: RUNNING (tasks: {task_states or 'none'})")
-                pending.discard(name)
+                del pending[name]
             elif connector_state == "FAILED" or "FAILED" in task_states:
                 print(f"[FAILED] {name}: connector={connector_state} tasks={task_states}")
                 failed.append(name)
-                pending.discard(name)
+                del pending[name]
+            elif connector_state in PAUSED_STATES and all(s in PAUSED_STATES for s in task_states):
+                print(f"[WARN]  {name}: switched, but connector is {connector_state} "
+                      f"(tasks: {task_states or 'none'}). Left as-is; resume it manually when ready.")
+                paused.append(name)
+                del pending[name]
+            else:
+                print(f"[WAIT]  {name}: connector={connector_state} tasks={task_states}")
 
-        if pending:
-            time.sleep(poll_interval)
-
-    if pending:
-        print(f"\nTimed out waiting for: {', '.join(pending)}")
-        failed.extend(pending)
+        if not pending:
+            break
+        if time.time() >= deadline:
+            print(f"\nTimed out waiting for: {', '.join(sorted(pending))}")
+            failed.extend(sorted(pending))
+            break
+        time.sleep(poll_interval)
 
     print()
+    if paused:
+        print(f"Switched but left paused/stopped: {', '.join(paused)}")
     if failed:
         print(f"Verification failed for: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
-    print("All connectors verified RUNNING.")
+    print("All connectors verified.")
 
 
 def cmd_commit_audit(direction, push=False):
@@ -408,7 +448,7 @@ def main():
     elif args.apply:
         cmd_apply(entries, args.direction, opener, conn_cfg, connect_url)
     elif args.verify:
-        cmd_verify(entries, opener, conn_cfg, connect_url, args.verify_timeout, args.verify_interval)
+        cmd_verify(entries, args.direction, opener, conn_cfg, connect_url, args.verify_timeout, args.verify_interval)
     else:
         print("No action flag given. Use one of: --validate-only --backup-only --diff-only "
               "--apply --verify --commit-audit", file=sys.stderr)
