@@ -1,2 +1,156 @@
-@Library('kafka-dr-lib') _
-drSwitchPipeline(direction: 'primary-to-dr', approvers: 'surya9618')
+// Jenkinsfile.switchover — Kafka Connect DR switch: PRIMARY -> DR
+//
+// Standalone pipeline (no shared library; needs no Jenkins admin access).
+// Jenkinsfile.switchback is identical except for `direction` below.
+// If you change one, change the other (diff them: only `direction` should differ).
+
+// ===================== per-environment settings =====================
+def direction        = 'primary-to-dr'
+def approver         = 'surya9618'                // Jenkins user ID(s), comma-separated, allowed to approve
+def gitCredsId       = 'git-push-creds'           // TEST value. Target env: 'jenkins' (GitLab Maintainer)
+def connectCredsId   = ''                         // TEST value (no auth). Target env: 'kafka-connect-rest-creds'
+def gitPushScheme    = 'https'                    // 'http' or 'https' — scheme used for the audit push
+def targetBranch     = 'main'                     // branch audit commits are pushed to
+// ====================================================================
+
+// Runs one apply_config.py action. Parameters and settings are passed via
+// environment variables and the sh block is single-quoted, so the SHELL
+// expands them — never Groovy (no credential leaks, no quoting injection).
+def runDr(String action, String connectCredsId) {
+    if (connectCredsId) {
+        withCredentials([usernamePassword(credentialsId: connectCredsId,
+                                          usernameVariable: 'CONNECT_USER',
+                                          passwordVariable: 'CONNECT_PASS')]) {
+            withEnv(["DR_ACTION=${action}"]) {
+                sh '''
+                    python3 -B scripts/apply_config.py \
+                        --direction "$DIRECTION" \
+                        "$DR_ACTION" \
+                        --connectors "$CONNECTOR_LIST" \
+                        --groups "$DR_GROUPS" \
+                        --user "$CONNECT_USER" \
+                        --password "$CONNECT_PASS"
+                '''
+            }
+        }
+    } else {
+        withEnv(["DR_ACTION=${action}"]) {
+            sh '''
+                python3 -B scripts/apply_config.py \
+                    --direction "$DIRECTION" \
+                    "$DR_ACTION" \
+                    --connectors "$CONNECTOR_LIST" \
+                    --groups "$DR_GROUPS"
+            '''
+        }
+    }
+}
+
+pipeline {
+    // TODO (P0, gotcha 3): confirm the agent for the target Jenkins. The agent
+    // needs python3 and git. The target env reference used
+    // agent { kubernetes { yaml pod_template } }.
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    parameters {
+        string(name: 'CONNECTOR_LIST', defaultValue: 'ALL',
+               description: 'Comma-separated connector names, or ALL')
+        // NOT named GROUPS: $GROUPS is a special bash variable (numeric group IDs).
+        string(name: 'DR_GROUPS', defaultValue: '',
+               description: 'Comma-separated group names (groups: field in primary-to-dr.yaml). Union with CONNECTOR_LIST. Leave CONNECTOR_LIST as ALL and set DR_GROUPS to select by group only.')
+        booleanParam(name: 'DRY_RUN', defaultValue: true,
+               description: 'If true: only checkout/validate/backup/diff. No approval, apply, verify or audit commit.')
+    }
+
+    environment {
+        DIRECTION       = "${direction}"
+        GIT_PUSH_SCHEME = "${gitPushScheme}"
+        TARGET_BRANCH   = "${targetBranch}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Validate mapping') {
+            steps { script { runDr('--validate-only', connectCredsId) } }
+        }
+
+        stage('Backup current configs') {
+            steps { script { runDr('--backup-only', connectCredsId) } }
+        }
+
+        stage('Show diff') {
+            steps {
+                sh '''
+                    python3 -B scripts/apply_config.py \
+                        --direction "$DIRECTION" \
+                        --diff-only \
+                        --connectors "$CONNECTOR_LIST" \
+                        --groups "$DR_GROUPS"
+                '''
+            }
+        }
+
+        stage('Approval') {
+            when { expression { !params.DRY_RUN } }
+            steps {
+                input message: "Confirm ${direction} DR switch for connectors: ${params.CONNECTOR_LIST}, groups: ${params.DR_GROUPS ?: '(none)'}? Review the 'Show diff' stage log first.",
+                      ok: "Switch ${direction}",
+                      submitter: approver
+            }
+        }
+
+        stage('Apply') {
+            when { expression { !params.DRY_RUN } }
+            steps { script { runDr('--apply', connectCredsId) } }
+        }
+
+        stage('Verify') {
+            when { expression { !params.DRY_RUN } }
+            steps { script { runDr('--verify', connectCredsId) } }
+        }
+
+        stage('Commit audit trail') {
+            when { expression { !params.DRY_RUN } }
+            steps {
+                sh '''
+                    git config user.email 'jenkins-dr-bot@localhost'
+                    git config user.name 'jenkins-dr-bot'
+                    python3 -B scripts/apply_config.py --direction "$DIRECTION" --commit-audit
+                '''
+                withCredentials([usernamePassword(credentialsId: gitCredsId,
+                                                  usernameVariable: 'GIT_USER',
+                                                  passwordVariable: 'GIT_TOKEN')]) {
+                    // Credentials go through a one-shot credential helper instead of
+                    // the URL, so special characters in the password need no escaping
+                    // and the token never appears in the remote URL.
+                    // HEAD:refs/heads/... because Jenkins checks out a detached HEAD.
+                    sh '''
+                        REMOTE_HOST_PATH=$(git config --get remote.origin.url | sed -E 's#^[a-zA-Z]+://([^@/]*@)?##')
+                        git -c credential.helper= \
+                            -c credential.helper='!f() { echo "username=$GIT_USER"; echo "password=$GIT_TOKEN"; }; f' \
+                            push "$GIT_PUSH_SCHEME://$REMOTE_HOST_PATH" "HEAD:refs/heads/$TARGET_BRANCH"
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo "Pipeline failed for direction=${direction}. Pre-change connector configs (if the backup stage completed) are in this build's archived artifacts under backups/. Restore manually by PUTting <name>.json to /connectors/<name>/config, or run the opposite-direction job."
+        }
+        always {
+            archiveArtifacts artifacts: 'backups/**', allowEmptyArchive: true
+        }
+    }
+}

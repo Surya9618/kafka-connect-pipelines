@@ -7,7 +7,7 @@
 # so keep it in this simple flat "key: value" format. Don't add nested
 # lists/maps beyond what's shown here.
 
-connect_url: http://localhost:8083
+connect_url: http://192.168.64.2:8083
 
 # Basic auth (leave both blank if not needed)
 user:

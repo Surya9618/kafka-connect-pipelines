@@ -60,12 +60,42 @@ def resolve_source_target(entry, direction):
     """
     Returns (source_value, target_value) for this entry given the direction.
     """
+    primary = entry.get("primary_url") or ""
+    dr = entry.get("dr_url") or ""
     if direction == "primary-to-dr":
-        return entry["primary_url"], entry["dr_url"]
+        return primary, dr
     elif direction == "dr-to-primary":
-        return entry["dr_url"], entry["primary_url"]
+        return dr, primary
     else:
         raise ValueError(f"Unknown direction: {direction}")
+
+
+def mapping_problem(entry, direction):
+    """
+    Returns a reason string if this mapping entry must not be switched,
+    or None if it is OK. Guards against a blank dr_url (generate_dr_mapping.py
+    writes dr_url: "" as a placeholder) being PUT into the connector, and
+    against no-op / typo entries where source and target are identical.
+    """
+    if not entry.get("config_key"):
+        return "config_key is blank"
+    source, target = resolve_source_target(entry, direction)
+    if not source.strip():
+        return "source value is blank"
+    if not target.strip():
+        return "target value is blank"
+    if source == target:
+        return "source and target values are identical"
+    return None
+
+
+def find_mapping_problems(entries, direction):
+    problems = []
+    for e in entries:
+        reason = mapping_problem(e, direction)
+        if reason:
+            problems.append((e["name"], reason))
+    return problems
 
 
 def filter_connectors(entries, connector_list, group_list=""):
@@ -117,6 +147,11 @@ def cmd_validate(entries, direction, opener, conn_cfg, connect_url):
     print(f"Validating {len(entries)} connector(s) for direction={direction}\n")
     problems = 0
     for e in entries:
+        reason = mapping_problem(e, direction)
+        if reason:
+            print(f"[INVALID] {e['name']}: mapping entry rejected: {reason} — fix primary-to-dr.yaml")
+            problems += 1
+            continue
         source, target = resolve_source_target(e, direction)
         try:
             live = common.get_connector_config(
@@ -181,11 +216,23 @@ def cmd_diff(entries, direction):
         source, target = resolve_source_target(e, direction)
         print(f"  {e['name']} [{e['type']}]")
         print(f"    {e['config_key']}: {source}  ->  {target}")
+        reason = mapping_problem(e, direction)
+        if reason:
+            print(f"    !! INVALID: {reason} — apply will refuse to run")
     print(f"\n{len(entries)} connector(s) in scope.")
 
 
 def cmd_apply(entries, direction, opener, conn_cfg, connect_url):
     print(f"Applying direction={direction} to {len(entries)} connector(s)\n")
+
+    bad = find_mapping_problems(entries, direction)
+    if bad:
+        for name, reason in bad:
+            print(f"[INVALID] {name}: {reason}")
+        print(f"\nRefusing to apply: {len(bad)} invalid mapping entr(y/ies). "
+              "No connectors were changed.", file=sys.stderr)
+        sys.exit(1)
+
     changed, skipped, failed = [], [], []
 
     for e in entries:
@@ -314,6 +361,12 @@ def main():
     parser.add_argument("--commit-audit", action="store_true")
     parser.add_argument("--push", action="store_true", help="git push after --commit-audit")
 
+    parser.add_argument("--connect-url", help="Override connect_url from config file")
+    parser.add_argument("--user", help="Override user from config file (Jenkins injects this)")
+    parser.add_argument("--password", help="Override password from config file (Jenkins injects this)")
+    parser.add_argument("--insecure", action="store_true", default=None,
+                        help="Skip TLS verification (self-signed certs). Overrides config file.")
+
     parser.add_argument("--verify-timeout", type=int, default=120)
     parser.add_argument("--verify-interval", type=int, default=5)
 
@@ -335,6 +388,14 @@ def main():
         return
 
     conn_cfg = common.load_connection_config(args.config)
+    if args.connect_url:
+        conn_cfg["connect_url"] = args.connect_url
+    if args.user:
+        conn_cfg["user"] = args.user
+    if args.password:
+        conn_cfg["password"] = args.password
+    if args.insecure is not None:
+        conn_cfg["insecure"] = args.insecure
     opener = common.build_opener(conn_cfg["insecure"])
     connect_url = conn_cfg["connect_url"].rstrip("/")
 
